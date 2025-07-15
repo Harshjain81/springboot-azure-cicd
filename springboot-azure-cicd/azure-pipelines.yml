@@ -1,0 +1,59 @@
+trigger:
+  branches:
+    include:
+      - master
+
+variables:
+  imageName: 'azure-springboot-demo'
+
+stages:
+- stage: Build
+  jobs:
+  - job: BuildAndPush
+    pool:
+      vmImage: 'ubuntu-latest'  # For self-hosted agent, use: pool: { name: Default }
+    steps:
+    - task: Maven@3
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'package'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '1.11'
+        mavenVersionOption: 'Default'
+
+    - task: Docker@2
+      inputs:
+        containerRegistry: 'hjainspringbootacr-connection'   # 🔁 Use your Docker service connection name
+        repository: '$(imageName)'
+        command: 'buildAndPush'
+        Dockerfile: '**/Dockerfile'
+        tags: |
+          latest
+
+- stage: Deploy
+  jobs:
+  - deployment: DeployToACI
+    environment: 'dev'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: 'hjain-azure-connection'    # 🔁 Use your Azure Resource Manager connection name
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az container create \
+                  --resource-group springboot-rg \
+                  --name springboot-container \
+                  --image hjainspringbootacr.azurecr.io/azure-springboot-demo:latest \
+                  --registry-login-server hjainspringbootacr.azurecr.io \
+                  --registry-username $(ACR_USERNAME) \
+                  --registry-password $(ACR_PASSWORD) \
+                  --dns-name-label hjainbootdemo \
+                  --ports 8080 \
+                  --location eastus \
+                  --os-type Linux \
+                  --cpu 1 \
+                  --memory 1.5
